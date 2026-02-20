@@ -21,7 +21,6 @@ seaborn>=0.11.0
 
 # Monitoring and visualization
 tensorboard>=2.11.0
-wandb
 
 # Development tools
 pytest>=7.0.0

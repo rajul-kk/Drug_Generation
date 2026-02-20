@@ -28,18 +28,7 @@ import gymnasium as gym
 
 
 class SACAgent:
-    """
-    Soft Actor-Critic (SAC) Agent for molecular generation.
-    
-    SAC is particularly useful for:
-    - Continuous action spaces (e.g., molecular property values)
-    - Sample-efficient learning from replay buffer
-    - Robust exploration through entropy maximization
-    - Stable training with twin Q-networks
-    
-    This implementation uses Stable Baselines3's SAC with customizable
-    network architecture and hyperparameters optimized for molecular tasks.
-    """
+    """Soft Actor-Critic (SAC) Agent for continuous molecular generation tasks."""
     
     def __init__(
         self,
@@ -64,31 +53,7 @@ class SACAgent:
         device: str = "auto",
         seed: Optional[int] = None,
     ):
-        """
-        Initialize SAC agent.
-        
-        Args:
-            env: Gymnasium environment or environment ID string
-            policy_layers: Tuple of layer sizes for actor and critic networks
-            learning_rate: Learning rate for optimizer (default: 3e-4)
-            buffer_size: Size of replay buffer (default: 1M)
-            learning_starts: Number of steps before training starts
-            batch_size: Minibatch size for training
-            tau: Soft update coefficient for target networks
-            gamma: Discount factor
-            train_freq: Update policy every train_freq steps
-            gradient_steps: Number of gradient steps per update
-            ent_coef: Entropy coefficient ('auto' for automatic tuning)
-            target_update_interval: Update target network every N steps
-            target_entropy: Target entropy ('auto' for automatic)
-            use_sde: Whether to use State Dependent Exploration
-            use_action_noise: Whether to add action noise for exploration
-            action_noise_std: Standard deviation of action noise
-            verbose: Verbosity level (0: no output, 1: info, 2: debug)
-            tensorboard_log: Path for tensorboard logs
-            device: Device to use ('auto', 'cpu', 'cuda')
-            seed: Random seed for reproducibility
-        """
+        # Initialize SAC agent with stable-baselines3 SAC algorithm
         # Create environment if string provided
         if isinstance(env, str):
             self.env = gym.make(env)
@@ -170,21 +135,7 @@ class SACAgent:
         n_eval_episodes: int = 5,
         callback: Optional[Any] = None,
     ) -> "SACAgent":
-        """
-        Train the SAC agent.
-        
-        Args:
-            total_timesteps: Total number of timesteps to train
-            checkpoint_freq: Frequency (in timesteps) to save checkpoints
-            checkpoint_path: Directory to save checkpoints
-            eval_env: Environment for evaluation (if None, uses training env)
-            eval_freq: Frequency of evaluation
-            n_eval_episodes: Number of episodes for evaluation
-            callback: Additional custom callbacks
-            
-        Returns:
-            self: Returns the trained agent
-        """
+        """Train the SAC agent for a specified number of timesteps."""
         # Create checkpoint directory
         os.makedirs(checkpoint_path, exist_ok=True)
         
@@ -246,27 +197,12 @@ class SACAgent:
         obs: np.ndarray,
         deterministic: bool = False,
     ) -> np.ndarray:
-        """
-        Predict action using the trained policy.
-        
-        Args:
-            obs: Current observation
-            deterministic: Whether to use deterministic actions
-            
-        Returns:
-            action: Predicted action
-        """
+        """Predict action using the trained policy."""
         action, _ = self.model.predict(obs, deterministic=deterministic)
         return action
     
     def save(self, path: str, save_replay_buffer: bool = True) -> None:
-        """
-        Save the trained model.
-        
-        Args:
-            path: Path to save the model (without extension)
-            save_replay_buffer: Whether to save the replay buffer
-        """
+        """Save the trained model and optionally the replay buffer."""
         self.model.save(path)
         
         if save_replay_buffer and self.model.replay_buffer is not None:
@@ -282,16 +218,7 @@ class SACAgent:
         path: str,
         load_replay_buffer: bool = False,
     ) -> "SACAgent":
-        """
-        Load a trained model.
-        
-        Args:
-            path: Path to the saved model (without extension)
-            load_replay_buffer: Whether to load the replay buffer
-            
-        Returns:
-            self: Returns the agent with loaded model
-        """
+        """Load a trained model and optionally the replay buffer."""
         self.model = SAC.load(path, env=self.vec_env)
         
         if load_replay_buffer:
@@ -314,17 +241,7 @@ class SACAgent:
         deterministic: bool = True,
         render: bool = False,
     ) -> Dict[str, float]:
-        """
-        Evaluate the trained agent.
-        
-        Args:
-            n_eval_episodes: Number of episodes to evaluate
-            deterministic: Use deterministic actions
-            render: Whether to render the environment
-            
-        Returns:
-            Dictionary with evaluation metrics
-        """
+        """Evaluate the trained agent and return metrics."""
         episode_rewards = []
         episode_lengths = []
         
@@ -373,23 +290,10 @@ class SACAgent:
 
 
 class DiscreteSACAgent(SACAgent):
-    """
-    SAC Agent adapted for discrete action spaces.
-    
-    This variant is useful when molecular generation uses discrete actions
-    (e.g., selecting atoms from a finite set, choosing bond types).
-    
-    Note: Requires installing additional dependencies for discrete SAC.
-    """
+    """SAC Agent adapted for discrete action spaces."""
     
     def __init__(self, *args, **kwargs):
-        """
-        Initialize Discrete SAC agent.
-        
-        For discrete action spaces, we can use techniques like:
-        - Gumbel-Softmax for differentiable sampling
-        - Separate Q-values per action
-        """
+        # Initialize Discrete SAC agent
         # Check if environment has discrete action space
         super().__init__(*args, **kwargs)
         

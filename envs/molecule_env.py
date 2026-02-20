@@ -27,14 +27,7 @@ DEFAULT_VOCAB = [
 ]
 
 class MoleculeEnv(gym.Env):
-    """
-    SMILES string building environment.
-    
-    The agent iteratively selects tokens from a vocabulary to build
-    a SMILES string. The episode terminates when the <STOP> token is
-    chosen or when max_steps is reached. The reward is only provided
-    at the end of the episode using the provided MolecularScorer.
-    """
+    """SMILES string building environment for RL agents."""
     metadata = {'render_modes': ['human']}
 
     def __init__(
@@ -44,13 +37,7 @@ class MoleculeEnv(gym.Env):
         max_steps: int = 60,
         continuous_actions: bool = False
     ):
-        """
-        Args:
-            scorer: The MolecularScorer instance to evaluate final SMILES.
-            vocab: List of valid tokens.
-            max_steps: Maximum length of the generated sequence.
-            continuous_actions: If True, uses spaces.Box for actions (for SAC).
-        """
+        # Initialize MoleculeEnv with scorer, vocabulary, and action space settings
         super().__init__()
         
         self.scorer = scorer

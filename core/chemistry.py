@@ -15,15 +15,7 @@ except ImportError as e:
     raise ImportError("RDKit is required. Run: pip install -r requirements.txt") from e
 
 def smiles_to_mol(smiles: str) -> Optional[Chem.Mol]:
-    """
-    Convert a SMILES string to an RDKit Mol object.
-    
-    Args:
-        smiles: The SMILES string of the molecule.
-        
-    Returns:
-        The RDKit Mol object if valid, None otherwise.
-    """
+    """Convert a SMILES string to an RDKit Mol object."""
     if not smiles or not isinstance(smiles, str):
         return None
     
@@ -37,15 +29,7 @@ def smiles_to_mol(smiles: str) -> Optional[Chem.Mol]:
         return None
 
 def is_valid_molecule(smiles: str) -> bool:
-    """
-    Check if a SMILES string represents a valid molecule.
-    
-    Args:
-        smiles: The SMILES string to check.
-        
-    Returns:
-        True if the SMILES is valid chemically, False otherwise.
-    """
+    """Check if a SMILES string represents a valid molecule."""
     mol = smiles_to_mol(smiles)
     if mol is None:
         return False
@@ -58,15 +42,7 @@ def is_valid_molecule(smiles: str) -> bool:
         return False
 
 def canonicalize_smiles(smiles: str) -> str:
-    """
-    Convert a SMILES string to its canonical form for consistent comparison.
-    
-    Args:
-        smiles: The SMILES string to canonicalize.
-        
-    Returns:
-        The canonical SMILES string, or an empty string if invalid.
-    """
+    """Convert a SMILES string to its canonical form for consistent comparison."""
     mol = smiles_to_mol(smiles)
     if mol is None:
         return ""
@@ -77,17 +53,7 @@ def canonicalize_smiles(smiles: str) -> str:
         return ""
 
 def get_morgan_fingerprint(mol: Chem.Mol, radius: int = 2, n_bits: int = 2048) -> Optional[np.ndarray]:
-    """
-    Generate a Morgan fingerprint (ECFP-like) for a molecule.
-    
-    Args:
-        mol: The RDKit Mol object.
-        radius: The Morgan fingerprint radius (default: 2, equivalent to ECFP4).
-        n_bits: Number of bits in the fingerprint vector.
-        
-    Returns:
-        A NumPy array containing the binary fingerprint, or None if generation fails.
-    """
+    """Generate a Morgan fingerprint (ECFP-like) for a molecule."""
     if mol is None:
         return None
         

@@ -27,18 +27,7 @@ import gymnasium as gym
 
 
 class PPOAgent:
-    """
-    PPO Agent with LSTM policy for molecular generation.
-    
-    This class wraps the RecurrentPPO algorithm from sb3-contrib, which uses
-    LSTM layers to handle sequential dependencies in the molecule building process.
-    
-    Key Features:
-    - LSTM-based policy for handling sequential molecule construction
-    - Automatic checkpoint saving and loading
-    - TensorBoard logging for monitoring training
-    - Customizable hyperparameters optimized for molecular tasks
-    """
+    """PPO Agent with LSTM policy for molecular generation."""
     
     def __init__(
         self,
@@ -60,28 +49,7 @@ class PPOAgent:
         device: str = "auto",
         seed: Optional[int] = None,
     ):
-        """
-        Initialize PPO agent with LSTM policy.
-        
-        Args:
-            env: Gymnasium environment or environment ID string
-            lstm_hidden_size: Size of LSTM hidden state (default: 256)
-            policy_layers: Tuple of layer sizes for policy/value networks
-            learning_rate: Learning rate for optimizer (default: 3e-4)
-            n_steps: Number of steps to collect per environment per update
-            batch_size: Minibatch size for training
-            n_epochs: Number of epochs for policy update
-            gamma: Discount factor
-            gae_lambda: GAE lambda parameter for advantage estimation
-            clip_range: PPO clipping parameter
-            ent_coef: Entropy coefficient for exploration
-            vf_coef: Value function coefficient in loss
-            max_grad_norm: Maximum gradient norm for clipping
-            verbose: Verbosity level (0: no output, 1: info, 2: debug)
-            tensorboard_log: Path for tensorboard logs
-            device: Device to use ('auto', 'cpu', 'cuda')
-            seed: Random seed for reproducibility
-        """
+        # Initialize PPO agent with LSTM policy using sb3_contrib RecurrentPPO
         # Create environment if string provided
         if isinstance(env, str):
             self.env = gym.make(env)
@@ -152,21 +120,7 @@ class PPOAgent:
         n_eval_episodes: int = 5,
         callback: Optional[Any] = None,
     ) -> "PPOAgent":
-        """
-        Train the PPO agent.
-        
-        Args:
-            total_timesteps: Total number of timesteps to train
-            checkpoint_freq: Frequency (in timesteps) to save checkpoints
-            checkpoint_path: Directory to save checkpoints
-            eval_env: Environment for evaluation (if None, uses training env)
-            eval_freq: Frequency of evaluation
-            n_eval_episodes: Number of episodes for evaluation
-            callback: Additional custom callbacks
-            
-        Returns:
-            self: Returns the trained agent
-        """
+        """Train the PPO agent for a specified number of timesteps."""
         # Create checkpoint directory
         os.makedirs(checkpoint_path, exist_ok=True)
         
@@ -254,26 +208,13 @@ class PPOAgent:
         return action, state
     
     def save(self, path: str) -> None:
-        """
-        Save the trained model.
-        
-        Args:
-            path: Path to save the model (without extension)
-        """
+        """Save the trained model."""
         self.model.save(path)
         if self.verbose >= 1:
             print(f"Model saved to {path}.zip")
     
     def load(self, path: str) -> "PPOAgent":
-        """
-        Load a trained model.
-        
-        Args:
-            path: Path to the saved model (without extension)
-            
-        Returns:
-            self: Returns the agent with loaded model
-        """
+        """Load a trained model."""
         self.model = RecurrentPPO.load(path, env=self.vec_env)
         if self.verbose >= 1:
             print(f"Model loaded from {path}.zip")
@@ -285,17 +226,7 @@ class PPOAgent:
         deterministic: bool = True,
         render: bool = False,
     ) -> Dict[str, float]:
-        """
-        Evaluate the trained agent.
-        
-        Args:
-            n_eval_episodes: Number of episodes to evaluate
-            deterministic: Use deterministic actions
-            render: Whether to render the environment
-            
-        Returns:
-            Dictionary with evaluation metrics
-        """
+        """Evaluate the trained agent and return metrics."""
         episode_rewards = []
         episode_lengths = []
         

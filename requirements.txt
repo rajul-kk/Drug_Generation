@@ -1,3 +1,28 @@
-stable-baselines3
-gymnasium
-rdkit   
+# Core RL libraries
+stable-baselines3[extra]>=2.0.0
+sb3-contrib>=2.0.0
+
+# Deep learning backend
+torch>=2.0.0
+torchvision>=0.15.0
+
+# Environment and gymnasium
+gymnasium>=0.28.0
+
+# Molecular operations
+rdkit-pypi
+guacamol
+
+# Utilities
+numpy>=1.21.0
+pandas>=1.3.0
+matplotlib>=3.4.0
+seaborn>=0.11.0
+
+# Monitoring and visualization
+tensorboard>=2.11.0
+wandb
+
+# Development tools
+pytest>=7.0.0
+black>=22.0.0

@@ -318,3 +318,73 @@ class RediscoveryScorer(MolecularScorer):
 register_scorer("tanimoto", TanimotoScorer)
 register_scorer("isomer", IsomerScorer)
 register_scorer("rediscovery", RediscoveryScorer)
+
+
+# ==========================================
+# Multi-Objective Scoring
+# ==========================================
+
+class MultiObjectiveScorer(MolecularScorer):
+    """
+    Combines multiple scorers into a single scalar reward.
+    
+    Can use arithmetic mean (weighted average) or geometric mean.
+    Geometric mean is often preferred for multi-parameter optimization
+    as a score of 0 in any single objective forces the total score to 0.
+    """
+    def __init__(
+        self, 
+        scorers: List[Dict[str, Any]], 
+        method: str = "geometric"
+    ):
+        """
+        Args:
+            scorers: List of dictionaries defining the component scorers:
+                [{'name': 'qed', 'weight': 1.0}, {'name': 'logp', 'weight': 0.5, 'kwargs': {}}]
+            method: 'arithmetic' or 'geometric'
+        """
+        self.method = method.lower()
+        if self.method not in ["arithmetic", "geometric"]:
+            raise ValueError(f"Unknown aggregation method: {self.method}")
+            
+        self.components = []
+        self.weights = []
+        
+        for config in scorers:
+            name = config['name']
+            weight = config.get('weight', 1.0)
+            kwargs = config.get('kwargs', {})
+            
+            scorer = get_scorer(name, **kwargs)
+            self.components.append(scorer)
+            self.weights.append(weight)
+            
+        # Normalize weights so they sum to 1.0
+        total_weight = sum(self.weights)
+        if total_weight > 0:
+            self.weights = [w / total_weight for w in self.weights]
+            
+    def score(self, smiles: str) -> float:
+        if not self.components:
+            return 0.0
+            
+        scores = [scorer.score(smiles) for scorer in self.components]
+        
+        # If any essential score is exactly 0.0, a geometric mean is 0.
+        if self.method == "geometric" and 0.0 in scores:
+            return 0.0
+            
+        if self.method == "arithmetic":
+            total = sum(w * s for w, s in zip(self.weights, scores))
+            return float(total)
+            
+        elif self.method == "geometric":
+            import numpy as np
+            # Note: scores are assumed to be in [0, 1]
+            log_scores = np.log(np.maximum(scores, 1e-10))
+            weighted_log = sum(w * ls for w, ls in zip(self.weights, log_scores))
+            return float(np.exp(weighted_log))
+            
+        return 0.0
+
+register_scorer("multi", MultiObjectiveScorer)

@@ -9,6 +9,7 @@ to manage and instantiate various scoring functions.
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Type
 import logging
+import numpy as np
 
 from core.chemistry import is_valid_molecule
 
@@ -219,3 +220,101 @@ register_scorer("qed", QEDScorer)
 register_scorer("sa", SAScorer)
 register_scorer("logp", LogPScorer)
 register_scorer("mw", MolecularWeightScorer)
+
+
+# ==========================================
+# GuacaMol Benchmark Scorers
+# ==========================================
+
+from rdkit.Chem import AllChem
+from rdkit import DataStructs
+from rdkit.Chem import inchi
+from core.chemistry import canonicalize_smiles
+
+
+class TanimotoScorer(MolecularScorer):
+    """
+    Tanimoto Similarity Scorer.
+    Calculates the Tanimoto similarity between the generated molecule
+    and a target molecule using Morgan fingerprints (ECFP-like).
+    Used for goal-directed generation and analogue design.
+    """
+    def __init__(self, target_smiles: str, radius: int = 2, n_bits: int = 2048):
+        self.target_smiles = target_smiles
+        self.radius = radius
+        self.n_bits = n_bits
+        
+        target_mol = smiles_to_mol(target_smiles)
+        if target_mol is not None:
+            self.target_fp = AllChem.GetMorganFingerprintAsBitVect(
+                target_mol, radius, nBits=n_bits
+            )
+        else:
+            self.target_fp = None
+
+    def score(self, smiles: str) -> float:
+        if self.target_fp is None:
+            return 0.0
+            
+        mol = smiles_to_mol(smiles)
+        if mol is None:
+            return 0.0
+            
+        try:
+            fp = AllChem.GetMorganFingerprintAsBitVect(mol, self.radius, nBits=self.n_bits)
+            return float(DataStructs.TanimotoSimilarity(self.target_fp, fp))
+        except Exception:
+            return 0.0
+
+
+class IsomerScorer(MolecularScorer):
+    """
+    Exact Isomer matching (InChI Key comparison).
+    Returns 1.0 if the identical structural isomer is generated, otherwise 0.0.
+    """
+    def __init__(self, target_smiles: str):
+        target_mol = smiles_to_mol(target_smiles)
+        if target_mol is not None:
+            self.target_inchi = inchi.MolToInchiKey(target_mol)
+        else:
+            self.target_inchi = None
+
+    def score(self, smiles: str) -> float:
+        if self.target_inchi is None:
+            return 0.0
+            
+        mol = smiles_to_mol(smiles)
+        if mol is None:
+            return 0.0
+            
+        try:
+            mol_inchi = inchi.MolToInchiKey(mol)
+            return 1.0 if mol_inchi == self.target_inchi else 0.0
+        except Exception:
+            return 0.0
+
+
+class RediscoveryScorer(MolecularScorer):
+    """
+    Rediscovery Scorer (SMILES exact match).
+    Compares canonical SMILES to rediscover a specific molecule.
+    Returns 1.0 on exact match, 0.0 otherwise.
+    """
+    def __init__(self, target_smiles: str):
+        self.target_smiles = canonicalize_smiles(target_smiles)
+
+    def score(self, smiles: str) -> float:
+        if not self.target_smiles:
+            return 0.0
+            
+        can_smiles = canonicalize_smiles(smiles)
+        if not can_smiles:
+            return 0.0
+            
+        return 1.0 if can_smiles == self.target_smiles else 0.0
+
+
+# Register GuacaMol scorers
+register_scorer("tanimoto", TanimotoScorer)
+register_scorer("isomer", IsomerScorer)
+register_scorer("rediscovery", RediscoveryScorer)

@@ -32,11 +32,11 @@ class PPOAgent:
     def __init__(
         self,
         env: Union[gym.Env, str],
-        lstm_hidden_size: int = 256,
-        policy_layers: tuple = (256, 256),
+        lstm_hidden_size: int = 512,
+        policy_layers: tuple = (512, 256, 128),
         learning_rate: float = 3e-4,
         n_steps: int = 2048,
-        batch_size: int = 64,
+        batch_size: int = 128,
         n_epochs: int = 10,
         gamma: float = 0.99,
         gae_lambda: float = 0.95,
@@ -280,23 +280,46 @@ class PPOAgent:
 
 # Example usage
 if __name__ == "__main__":
-    # Example with CartPole (replace with molecular environment)
-    print("Initializing PPO agent with LSTM policy...")
+    import argparse
+    import sys
+    import os
+    
+    # Needs to be imported here to prevent circular imports if scoring/env imports PPO
+    # Add project root to sys.path so we can import core and envs correctly
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from core.scoring import get_scorer
+    from envs.molecule_env import MoleculeEnv
+    
+    parser = argparse.ArgumentParser(description="Train PPO Agent for Molecule Generation")
+    parser.add_argument("--scorer", type=str, default="qed", help="Scoring function")
+    parser.add_argument("--timesteps", type=int, default=600000, help="Total training timesteps")
+    parser.add_argument("--max_steps", type=int, default=60, help="Max tokens per molecule")
+    args = parser.parse_args()
+    
+    print(f"--- Training PPO Agent ({args.timesteps} timesteps) ---")
+    scorer = get_scorer(args.scorer)
+    env = MoleculeEnv(scorer=scorer, max_steps=args.max_steps, continuous_actions=False)
+    eval_env = MoleculeEnv(scorer=scorer, max_steps=args.max_steps, continuous_actions=False)
+    
     agent = PPOAgent(
-        env="CartPole-v1",
-        lstm_hidden_size=256,
-        learning_rate=3e-4,
-        verbose=1,
+        env=env,
+        tensorboard_log=f"./logs/ppo_{args.scorer}"
     )
     
-    print("\nTraining agent...")
-    agent.train(
-        total_timesteps=50000,
-        checkpoint_freq=10000,
-    )
+    checkpoint_path = f"./checkpoints/ppo_{args.scorer}"
     
-    print("\nEvaluating agent...")
-    results = agent.evaluate(n_eval_episodes=10)
+    try:
+        agent.train(
+            total_timesteps=args.timesteps,
+            checkpoint_freq=50000,
+            checkpoint_path=checkpoint_path,
+            eval_env=eval_env,
+            eval_freq=10000,
+        )
+        print(f"✅ PPO Training completed!")
+    except KeyboardInterrupt:
+        print(f"⚠️ Training interrupted. Saving to {checkpoint_path}/interrupted_model")
+        agent.save(f"{checkpoint_path}/interrupted_model")
     
     print("\nSaving agent...")
     agent.save("./checkpoints/ppo_lstm/final_model")

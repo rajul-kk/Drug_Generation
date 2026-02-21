@@ -33,10 +33,10 @@ class SACAgent:
     def __init__(
         self,
         env: Union[gym.Env, str],
-        policy_layers: tuple = (256, 256),
+        policy_layers: tuple = (512, 256, 128),
         learning_rate: float = 3e-4,
         buffer_size: int = 100_000,
-        learning_starts: int = 100,
+        learning_starts: int = 10000,
         batch_size: int = 256,
         tau: float = 0.005,
         gamma: float = 0.99,
@@ -304,26 +304,45 @@ class DiscreteSACAgent(SACAgent):
 
 # Example usage
 if __name__ == "__main__":
-    # Example with Pendulum (continuous actions - replace with molecular environment)
-    print("Initializing SAC agent...")
+    import argparse
+    import sys
+    import os
+    
+    # Needs to be imported here to prevent circular imports if scoring/env imports SAC
+    # Add project root to sys.path so we can import core and envs correctly
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from core.scoring import get_scorer
+    from envs.molecule_env import MoleculeEnv
+    
+    parser = argparse.ArgumentParser(description="Train SAC Agent for Molecule Generation")
+    parser.add_argument("--scorer", type=str, default="qed", help="Scoring function")
+    parser.add_argument("--timesteps", type=int, default=300000, help="Total training timesteps")
+    parser.add_argument("--max_steps", type=int, default=60, help="Max tokens per molecule")
+    args = parser.parse_args()
+    
+    print(f"--- Training SAC Agent ({args.timesteps} timesteps) ---")
+    scorer = get_scorer(args.scorer)
+    
+    # SAC in SB3 requires continuous action space
+    env = MoleculeEnv(scorer=scorer, max_steps=args.max_steps, continuous_actions=True)
+    eval_env = MoleculeEnv(scorer=scorer, max_steps=args.max_steps, continuous_actions=True)
+    
     agent = SACAgent(
-        env="Pendulum-v1",
-        policy_layers=(256, 256),
-        learning_rate=3e-4,
-        buffer_size=100000,
-        verbose=1,
+        env=env,
+        tensorboard_log=f"./logs/sac_{args.scorer}"
     )
     
-    print("\nTraining agent...")
-    agent.train(
-        total_timesteps=50000,
-        checkpoint_freq=10000,
-    )
+    checkpoint_path = f"./checkpoints/sac_{args.scorer}"
     
-    print("\nEvaluating agent...")
-    results = agent.evaluate(n_eval_episodes=10)
-    
-    print("\nSaving agent...")
-    agent.save("./checkpoints/sac/final_model", save_replay_buffer=True)
-    
-    print(f"\nReplay buffer size: {agent.get_replay_buffer_size()}")
+    try:
+        agent.train(
+            total_timesteps=args.timesteps,
+            checkpoint_freq=50000,
+            checkpoint_path=checkpoint_path,
+            eval_env=eval_env,
+            eval_freq=10000,
+        )
+        print(f"✅ SAC Training completed!")
+    except KeyboardInterrupt:
+        print(f"⚠️ Training interrupted. Saving to {checkpoint_path}/interrupted_model")
+        agent.save(f"{checkpoint_path}/interrupted_model")

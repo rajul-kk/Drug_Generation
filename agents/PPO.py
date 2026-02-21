@@ -19,11 +19,26 @@ from stable_baselines3.common.callbacks import (
     CheckpointCallback,
     EvalCallback,
     CallbackList,
+    BaseCallback,
 )
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 from sb3_contrib import RecurrentPPO
 from sb3_contrib.common.recurrent.policies import RecurrentActorCriticPolicy
 import gymnasium as gym
+
+
+class MetricPrinterCallback(BaseCallback):
+    """Callback to print training metrics periodically while keeping the progress bar."""
+    def __init__(self, print_freq: int = 2048, verbose: int = 0):
+        super().__init__(verbose)
+        self.print_freq = print_freq
+
+    def _on_step(self) -> bool:
+        if self.n_calls % self.print_freq == 0:
+            if hasattr(self.model, "ep_info_buffer") and len(self.model.ep_info_buffer) > 0:
+                mean_reward = np.mean([ep_info["r"] for ep_info in self.model.ep_info_buffer])
+                print(f"\r[Step {self.num_timesteps}] Rolling Mean Reward: {mean_reward:.3f}")
+        return True
 
 
 class PPOAgent:
@@ -32,8 +47,8 @@ class PPOAgent:
     def __init__(
         self,
         env: Union[gym.Env, str],
-        lstm_hidden_size: int = 512,
-        policy_layers: tuple = (512, 256, 128),
+        lstm_hidden_size: int = 128,
+        policy_layers: tuple = (128, 128),
         learning_rate: float = 3e-4,
         n_steps: int = 2048,
         batch_size: int = 128,
@@ -150,6 +165,9 @@ class PPOAgent:
                 render=False,
             )
             callbacks.append(eval_callback)
+            
+        # Metric Printer Callback
+        callbacks.append(MetricPrinterCallback(print_freq=2048))
         
         # Add custom callback if provided
         if callback is not None:

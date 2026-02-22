@@ -37,7 +37,7 @@ class MetricPrinterCallback(BaseCallback):
         if self.n_calls % self.print_freq == 0:
             if hasattr(self.model, "ep_info_buffer") and len(self.model.ep_info_buffer) > 0:
                 mean_reward = np.mean([ep_info["r"] for ep_info in self.model.ep_info_buffer])
-                print(f"\r[Step {self.num_timesteps}] Rolling Mean Reward: {mean_reward:.3f}")
+                print(f"\n[Step {self.num_timesteps}] Rolling Mean Reward: {mean_reward:.3f}", flush=True)
         return True
 
 
@@ -312,6 +312,7 @@ if __name__ == "__main__":
     parser.add_argument("--scorer", type=str, default="qed", help="Scoring function")
     parser.add_argument("--timesteps", type=int, default=600000, help="Total training timesteps")
     parser.add_argument("--max_steps", type=int, default=60, help="Max tokens per molecule")
+    parser.add_argument("--resume", type=str, default=None, help="Path to a saved model .zip to resume training from")
     args = parser.parse_args()
     
     print(f"--- Training PPO Agent ({args.timesteps} timesteps) ---")
@@ -324,6 +325,10 @@ if __name__ == "__main__":
         tensorboard_log=f"./logs/ppo_{args.scorer}"
     )
     
+    if args.resume:
+        print(f"Loading checkpoint from {args.resume}...")
+        agent.load(args.resume)
+        
     checkpoint_path = f"./checkpoints/ppo_{args.scorer}"
     
     try:

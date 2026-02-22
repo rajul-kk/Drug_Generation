@@ -66,7 +66,19 @@ class QEDScorer(MolecularScorer):
         if mol is None:
             return 0.0
         try:
-            return float(QED.qed(mol))
+            score = float(QED.qed(mol))
+            
+            # Penalize trivially small molecules to prevent reward hacking (e.g. 'F')
+            num_heavy_atoms = mol.GetNumHeavyAtoms()
+            if num_heavy_atoms < 5:
+                score *= (num_heavy_atoms / 5.0)
+                
+            # Penalize non-organic molecules (must contain Carbon) to prevent 'OIOICl' loops
+            has_carbon = any(atom.GetAtomicNum() == 6 for atom in mol.GetAtoms())
+            if not has_carbon:
+                score *= 0.1
+                
+            return score
         except Exception:
             return 0.0
 

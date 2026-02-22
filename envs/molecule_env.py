@@ -92,10 +92,12 @@ class MoleculeEnv(gym.Env):
     def step(self, action: Union[int, np.ndarray]):
         """Takes a step in the environment."""
         # Handle continuous actions from continuous SAC by taking the argmax
-        if self.continuous_actions or isinstance(action, (np.ndarray, list)):
+        if self.continuous_actions:
+            # If continuous, argmax over the vocab probabilities
             action_idx = int(np.argmax(action))
         else:
-            action_idx = int(action)
+            # If discrete (PPO), action might be a scalar or a wrapped array [[idx]]
+            action_idx = int(np.squeeze(action))
             
         token = self.idx_to_token.get(action_idx, '<PAD>')
         

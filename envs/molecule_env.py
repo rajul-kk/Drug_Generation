@@ -10,9 +10,10 @@ import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
 import logging
-from typing import Optional, Dict, Any, Union
+from typing import Optional, Dict, Any, Union, Iterable, Set
 
 from core.scoring import MolecularScorer
+from core.chemistry import canonicalize_smiles
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,10 @@ class MoleculeEnv(gym.Env):
         scorer: MolecularScorer,
         vocab: list = DEFAULT_VOCAB,
         max_steps: int = 60,
-        continuous_actions: bool = False
+        continuous_actions: bool = False,
+        duplicate_penalty: float = 1.0,
+        novelty_bonus: float = 0.0,
+        reference_smiles: Optional[Iterable[str]] = None,
     ):
         # Initialize MoleculeEnv with scorer, vocabulary, and action space settings
         super().__init__()
@@ -45,9 +49,15 @@ class MoleculeEnv(gym.Env):
         self.vocab_size = len(vocab)
         self.max_steps = max_steps
         self.continuous_actions = continuous_actions
+        self.duplicate_penalty = float(np.clip(duplicate_penalty, 0.0, 1.0))
+        self.novelty_bonus = max(0.0, float(novelty_bonus))
         
         self.token_to_idx = {t: i for i, t in enumerate(self.vocab)}
         self.idx_to_token = {i: t for i, t in enumerate(self.vocab)}
+        self.seen_smiles: Set[str] = set()
+        self.reference_smiles: Set[str] = set()
+        if reference_smiles:
+            self.set_reference_smiles(reference_smiles)
         
         # Action space: Discrete (PPO) or Continuous (SAC -> Argmax inside step)
         if self.continuous_actions:
@@ -70,6 +80,19 @@ class MoleculeEnv(gym.Env):
         self.state_seq = np.zeros(self.max_steps, dtype=np.int32)
         self.current_step = 0
         self.smiles = ""
+
+    def set_reference_smiles(self, smiles_list: Iterable[str]) -> None:
+        """Set reference molecules used for novelty checks."""
+        processed = set()
+        for smiles in smiles_list:
+            can = canonicalize_smiles(str(smiles).strip())
+            if can:
+                processed.add(can)
+        self.reference_smiles = processed
+
+    def clear_seen_molecules(self) -> None:
+        """Clear generated molecule memory used for duplicate penalties."""
+        self.seen_smiles.clear()
 
     def _get_obs(self) -> np.ndarray:
         """Returns the flattened one-hot encoded state sequence."""
@@ -122,17 +145,38 @@ class MoleculeEnv(gym.Env):
             truncated = True
             
         # Terminal condition: calculate reward
+        canonical_smiles = ""
+        is_duplicate = False
+        is_novel = False
         if terminated or truncated:
             if len(self.smiles) > 0:
                 reward = self.scorer.score(self.smiles)
+
+                canonical_smiles = canonicalize_smiles(self.smiles)
+                if canonical_smiles:
+                    is_duplicate = canonical_smiles in self.seen_smiles
+                    if is_duplicate:
+                        reward *= self.duplicate_penalty
+                    else:
+                        self.seen_smiles.add(canonical_smiles)
+
+                    if self.reference_smiles:
+                        is_novel = canonical_smiles not in self.reference_smiles
+                        if is_novel:
+                            reward += self.novelty_bonus
+
+                reward = float(np.clip(reward, 0.0, 1.0))
             else:
                 reward = 0.0
                 
         # Optional info dict
         info = {
             'smiles': self.smiles,
+            'canonical_smiles': canonical_smiles,
             'step': self.current_step,
-            'is_valid': reward > 0.0 if (terminated or truncated) else False
+            'is_valid': reward > 0.0 if (terminated or truncated) else False,
+            'is_duplicate': is_duplicate,
+            'is_novel': is_novel,
         }
         
         return self._get_obs(), reward, terminated, truncated, info

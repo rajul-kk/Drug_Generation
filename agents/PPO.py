@@ -22,9 +22,17 @@ from stable_baselines3.common.callbacks import (
     BaseCallback,
 )
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
-from sb3_contrib import RecurrentPPO
+from sb3_contrib import RecurrentPPO, MaskablePPO
+from sb3_contrib.common.wrappers import ActionMasker
+from sb3_contrib.common.maskable.callbacks import MaskableEvalCallback
+from sb3_contrib.common.maskable.utils import get_action_masks
 from sb3_contrib.common.recurrent.policies import RecurrentActorCriticPolicy
 import gymnasium as gym
+
+
+def mask_fn(env: gym.Env) -> np.ndarray:
+    """Return action mask for sb3-contrib ActionMasker."""
+    return env.action_masks()
 
 
 class MetricPrinterCallback(BaseCallback):
@@ -63,6 +71,7 @@ class PPOAgent:
         tensorboard_log: Optional[str] = "./logs/ppo_lstm",
         device: str = "auto",
         seed: Optional[int] = None,
+        use_action_mask: bool = False,
     ):
         # Initialize PPO agent with LSTM policy using sb3_contrib RecurrentPPO
         # Create environment if string provided
@@ -70,9 +79,16 @@ class PPOAgent:
             self.env = gym.make(env)
         else:
             self.env = env
+
+        self.use_action_mask = use_action_mask
         
-        # Wrap in DummyVecEnv for compatibility
-        self.vec_env = DummyVecEnv([lambda: self.env])
+        # Wrap in ActionMasker + DummyVecEnv for maskable PPO, otherwise plain DummyVecEnv.
+        if self.use_action_mask:
+            self.masked_env = ActionMasker(self.env, mask_fn)
+            self.vec_env = DummyVecEnv([lambda: self.masked_env])
+        else:
+            self.masked_env = None
+            self.vec_env = DummyVecEnv([lambda: self.env])
         
         # Store configuration
         self.config = {
@@ -88,6 +104,7 @@ class PPOAgent:
             "ent_coef": ent_coef,
             "vf_coef": vf_coef,
             "max_grad_norm": max_grad_norm,
+            "use_action_mask": use_action_mask,
         }
         
         # Policy kwargs for LSTM and network architecture
@@ -102,26 +119,54 @@ class PPOAgent:
             "enable_critic_lstm": True,  # Use LSTM for both actor and critic
         }
         
-        # Initialize RecurrentPPO model
-        self.model = RecurrentPPO(
-            policy="MlpLstmPolicy",
-            env=self.vec_env,
-            learning_rate=learning_rate,
-            n_steps=n_steps,
-            batch_size=batch_size,
-            n_epochs=n_epochs,
-            gamma=gamma,
-            gae_lambda=gae_lambda,
-            clip_range=clip_range,
-            ent_coef=ent_coef,
-            vf_coef=vf_coef,
-            max_grad_norm=max_grad_norm,
-            verbose=verbose,
-            tensorboard_log=tensorboard_log,
-            policy_kwargs=policy_kwargs,
-            device=device,
-            seed=seed,
-        )
+        if self.use_action_mask:
+            # MaskablePPO currently uses non-recurrent policies.
+            self.model = MaskablePPO(
+                policy="MlpPolicy",
+                env=self.vec_env,
+                learning_rate=learning_rate,
+                n_steps=n_steps,
+                batch_size=batch_size,
+                n_epochs=n_epochs,
+                gamma=gamma,
+                gae_lambda=gae_lambda,
+                clip_range=clip_range,
+                ent_coef=ent_coef,
+                vf_coef=vf_coef,
+                max_grad_norm=max_grad_norm,
+                verbose=verbose,
+                tensorboard_log=tensorboard_log,
+                policy_kwargs={
+                    "net_arch": {
+                        "pi": list(policy_layers),
+                        "vf": list(policy_layers),
+                    },
+                    "activation_fn": th.nn.ReLU,
+                },
+                device=device,
+                seed=seed,
+            )
+        else:
+            # Initialize RecurrentPPO model
+            self.model = RecurrentPPO(
+                policy="MlpLstmPolicy",
+                env=self.vec_env,
+                learning_rate=learning_rate,
+                n_steps=n_steps,
+                batch_size=batch_size,
+                n_epochs=n_epochs,
+                gamma=gamma,
+                gae_lambda=gae_lambda,
+                clip_range=clip_range,
+                ent_coef=ent_coef,
+                vf_coef=vf_coef,
+                max_grad_norm=max_grad_norm,
+                verbose=verbose,
+                tensorboard_log=tensorboard_log,
+                policy_kwargs=policy_kwargs,
+                device=device,
+                seed=seed,
+            )
         
         self.verbose = verbose
         
@@ -146,7 +191,7 @@ class PPOAgent:
         checkpoint_callback = CheckpointCallback(
             save_freq=checkpoint_freq,
             save_path=checkpoint_path,
-            name_prefix="ppo_lstm_model",
+            name_prefix="ppo_masked_model" if self.use_action_mask else "ppo_lstm_model",
             save_replay_buffer=False,
             save_vecnormalize=False,
         )
@@ -154,16 +199,29 @@ class PPOAgent:
         
         # Evaluation callback
         if eval_env is not None:
-            eval_vec_env = DummyVecEnv([lambda: eval_env])
-            eval_callback = EvalCallback(
-                eval_vec_env,
-                best_model_save_path=os.path.join(checkpoint_path, "best_model"),
-                log_path=os.path.join(checkpoint_path, "eval_logs"),
-                eval_freq=eval_freq,
-                n_eval_episodes=n_eval_episodes,
-                deterministic=True,
-                render=False,
-            )
+            if self.use_action_mask:
+                masked_eval_env = ActionMasker(eval_env, mask_fn)
+                eval_vec_env = DummyVecEnv([lambda: masked_eval_env])
+                eval_callback = MaskableEvalCallback(
+                    eval_vec_env,
+                    best_model_save_path=os.path.join(checkpoint_path, "best_model"),
+                    log_path=os.path.join(checkpoint_path, "eval_logs"),
+                    eval_freq=eval_freq,
+                    n_eval_episodes=n_eval_episodes,
+                    deterministic=True,
+                    render=False,
+                )
+            else:
+                eval_vec_env = DummyVecEnv([lambda: eval_env])
+                eval_callback = EvalCallback(
+                    eval_vec_env,
+                    best_model_save_path=os.path.join(checkpoint_path, "best_model"),
+                    log_path=os.path.join(checkpoint_path, "eval_logs"),
+                    eval_freq=eval_freq,
+                    n_eval_episodes=n_eval_episodes,
+                    deterministic=True,
+                    render=False,
+                )
             callbacks.append(eval_callback)
             
         # Metric Printer Callback
@@ -179,7 +237,10 @@ class PPOAgent:
         # Train the model
         if self.verbose >= 1:
             print(f"Starting PPO training for {total_timesteps} timesteps...")
-            print(f"LSTM hidden size: {self.config['lstm_hidden_size']}")
+            if self.use_action_mask:
+                print("Using MaskablePPO with environment action masks")
+            else:
+                print(f"LSTM hidden size: {self.config['lstm_hidden_size']}")
             print(f"Checkpoints will be saved to: {checkpoint_path}")
         
         self.model.learn(
@@ -215,14 +276,23 @@ class PPOAgent:
         """
         if episode_start is None:
             episode_start = np.array([False])
-        
+
+        if self.use_action_mask:
+            action_masks = self.env.action_masks() if hasattr(self.env, "action_masks") else None
+            action, _ = self.model.predict(
+                obs,
+                deterministic=deterministic,
+                action_masks=action_masks,
+            )
+            return action, None
+
         action, state = self.model.predict(
             obs,
             state=state,
             episode_start=episode_start,
             deterministic=deterministic,
         )
-        
+
         return action, state
     
     def save(self, path: str) -> None:
@@ -233,7 +303,10 @@ class PPOAgent:
     
     def load(self, path: str) -> "PPOAgent":
         """Load a trained model."""
-        self.model = RecurrentPPO.load(path, env=self.vec_env)
+        if self.use_action_mask:
+            self.model = MaskablePPO.load(path, env=self.vec_env)
+        else:
+            self.model = RecurrentPPO.load(path, env=self.vec_env)
         if self.verbose >= 1:
             print(f"Model loaded from {path}.zip")
         return self
@@ -254,17 +327,24 @@ class PPOAgent:
             episode_reward = 0
             episode_length = 0
             
-            # Reset LSTM states
             lstm_states = None
             episode_starts = np.ones((1,), dtype=bool)
             
             while not done:
-                action, lstm_states = self.model.predict(
-                    obs,
-                    state=lstm_states,
-                    episode_start=episode_starts,
-                    deterministic=deterministic,
-                )
+                if self.use_action_mask:
+                    action_masks = get_action_masks(self.vec_env)
+                    action, _ = self.model.predict(
+                        obs,
+                        deterministic=deterministic,
+                        action_masks=action_masks,
+                    )
+                else:
+                    action, lstm_states = self.model.predict(
+                        obs,
+                        state=lstm_states,
+                        episode_start=episode_starts,
+                        deterministic=deterministic,
+                    )
                 obs, reward, done, info = self.vec_env.step(action)
                 
                 episode_reward += reward[0]
@@ -314,6 +394,7 @@ if __name__ == "__main__":
     parser.add_argument("--timesteps", type=int, default=600000, help="Total training timesteps")
     parser.add_argument("--max_steps", type=int, default=60, help="Max tokens per molecule")
     parser.add_argument("--resume", type=str, default=None, help="Path to a saved model .zip to resume training from")
+    parser.add_argument("--mask-actions", action="store_true", help="Enable action masking via MaskablePPO")
     parser.add_argument("--duplicate-penalty", type=float, default=0.3, help="Duplicate molecule penalty in [0,1]")
     parser.add_argument("--novelty-bonus", type=float, default=0.0, help="Bonus added to molecules novel to reference set")
     parser.add_argument("--reference-file", type=str, default=None, help="Optional line-delimited reference SMILES file")
@@ -354,6 +435,7 @@ if __name__ == "__main__":
     
     agent = PPOAgent(
         env=env,
+        use_action_mask=args.mask_actions,
         tensorboard_log=f"./logs/ppo_{args.scorer}"
     )
     

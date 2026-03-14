@@ -325,6 +325,7 @@ if __name__ == "__main__":
     import argparse
     import sys
     import os
+    from core.chemistry import canonicalize_smiles
     
     # Needs to be imported here to prevent circular imports if scoring/env imports SAC
     # Add project root to sys.path so we can import core and envs correctly
@@ -337,14 +338,45 @@ if __name__ == "__main__":
     parser.add_argument("--timesteps", type=int, default=300000, help="Total training timesteps")
     parser.add_argument("--max_steps", type=int, default=60, help="Max tokens per molecule")
     parser.add_argument("--resume", type=str, default=None, help="Path to a saved model .zip to resume training from")
+    parser.add_argument("--duplicate-penalty", type=float, default=0.3, help="Duplicate molecule penalty in [0,1]")
+    parser.add_argument("--novelty-bonus", type=float, default=0.0, help="Bonus added to molecules novel to reference set")
+    parser.add_argument("--reference-file", type=str, default=None, help="Optional line-delimited reference SMILES file")
     args = parser.parse_args()
+
+    reference_smiles = None
+    if args.reference_file:
+        if not os.path.exists(args.reference_file):
+            raise FileNotFoundError(f"Reference file not found: {args.reference_file}")
+        loaded = set()
+        with open(args.reference_file, "r", encoding="utf-8") as f:
+            for line in f:
+                smiles = line.strip().split()[0] if line.strip() else ""
+                can = canonicalize_smiles(smiles)
+                if can:
+                    loaded.add(can)
+        reference_smiles = loaded
+        print(f"Loaded {len(reference_smiles)} canonical reference molecules.")
     
     print(f"--- Training SAC Agent ({args.timesteps} timesteps) ---")
     scorer = get_scorer(args.scorer)
     
     # SAC in SB3 requires continuous action space
-    env = MoleculeEnv(scorer=scorer, max_steps=args.max_steps, continuous_actions=True)
-    eval_env = MoleculeEnv(scorer=scorer, max_steps=args.max_steps, continuous_actions=True)
+    env = MoleculeEnv(
+        scorer=scorer,
+        max_steps=args.max_steps,
+        continuous_actions=True,
+        duplicate_penalty=args.duplicate_penalty,
+        novelty_bonus=args.novelty_bonus,
+        reference_smiles=reference_smiles,
+    )
+    eval_env = MoleculeEnv(
+        scorer=scorer,
+        max_steps=args.max_steps,
+        continuous_actions=True,
+        duplicate_penalty=1.0,
+        novelty_bonus=0.0,
+        reference_smiles=reference_smiles,
+    )
     
     agent = SACAgent(
         env=env,

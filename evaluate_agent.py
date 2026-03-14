@@ -72,6 +72,7 @@ def main():
     parser.add_argument("--model", type=str, required=True, help="Path to the model .zip file")
     parser.add_argument("--episodes", type=int, default=10, help="Number of molecules to generate")
     parser.add_argument("--stochastic", action="store_true", help="Sample actions stochastically (default is deterministic)")
+    parser.add_argument("--mask-actions", action="store_true", help="Enable action masking (MaskablePPO for PPO, env masking for SAC)")
     parser.add_argument("--reference-file", type=str, default=None, help="Optional line-delimited reference SMILES file for novelty")
     parser.add_argument("--duplicate-penalty", type=float, default=1.0, help="Duplicate molecule penalty in [0,1]; 1.0 disables penalty")
     parser.add_argument("--novelty-bonus", type=float, default=0.0, help="Bonus added to novel molecules when reference file is set")
@@ -94,6 +95,7 @@ def main():
         scorer=scorer,
         max_steps=60,
         continuous_actions=is_continuous,
+        enable_action_masking=args.mask_actions,
         duplicate_penalty=args.duplicate_penalty,
         novelty_bonus=args.novelty_bonus,
         reference_smiles=reference_smiles if reference_smiles else None,
@@ -101,7 +103,7 @@ def main():
     
     if args.agent == "ppo":
         from agents.PPO import PPOAgent
-        agent = PPOAgent(env=env, verbose=0).load(args.model)
+        agent = PPOAgent(env=env, verbose=0, use_action_mask=args.mask_actions).load(args.model)
     else:
         from agents.SAC import SACAgent
         agent = SACAgent(env=env, verbose=0).load(args.model)

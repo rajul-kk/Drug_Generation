@@ -63,6 +63,7 @@ class SACAgent:
         use_sde: bool = False,
         use_action_noise: bool = False,
         action_noise_std: float = 0.1,
+        use_action_mask: bool = False,
         verbose: int = 1,
         tensorboard_log: Optional[str] = "./logs/sac",
         device: str = "auto",
@@ -91,6 +92,7 @@ class SACAgent:
             "gradient_steps": gradient_steps,
             "ent_coef": ent_coef,
             "target_update_interval": target_update_interval,
+            "use_action_mask": use_action_mask,
         }
         
         # Policy kwargs for network architecture
@@ -197,6 +199,8 @@ class SACAgent:
             print(f"Actor network: {self.config['policy_layers']}")
             print(f"Critic network: {self.config['policy_layers']}")
             print(f"Replay buffer size: {self.config['buffer_size']}")
+            if self.config["use_action_mask"]:
+                print("Using environment action masking for SAC argmax token selection")
             print(f"Checkpoints will be saved to: {checkpoint_path}")
         
         self.model.learn(
@@ -338,6 +342,7 @@ if __name__ == "__main__":
     parser.add_argument("--timesteps", type=int, default=300000, help="Total training timesteps")
     parser.add_argument("--max_steps", type=int, default=60, help="Max tokens per molecule")
     parser.add_argument("--resume", type=str, default=None, help="Path to a saved model .zip to resume training from")
+    parser.add_argument("--mask-actions", action="store_true", help="Enable environment action masking for SAC")
     parser.add_argument("--duplicate-penalty", type=float, default=0.3, help="Duplicate molecule penalty in [0,1]")
     parser.add_argument("--novelty-bonus", type=float, default=0.0, help="Bonus added to molecules novel to reference set")
     parser.add_argument("--reference-file", type=str, default=None, help="Optional line-delimited reference SMILES file")
@@ -365,6 +370,7 @@ if __name__ == "__main__":
         scorer=scorer,
         max_steps=args.max_steps,
         continuous_actions=True,
+        enable_action_masking=args.mask_actions,
         duplicate_penalty=args.duplicate_penalty,
         novelty_bonus=args.novelty_bonus,
         reference_smiles=reference_smiles,
@@ -373,6 +379,7 @@ if __name__ == "__main__":
         scorer=scorer,
         max_steps=args.max_steps,
         continuous_actions=True,
+        enable_action_masking=args.mask_actions,
         duplicate_penalty=1.0,
         novelty_bonus=0.0,
         reference_smiles=reference_smiles,
@@ -380,6 +387,7 @@ if __name__ == "__main__":
     
     agent = SACAgent(
         env=env,
+        use_action_mask=args.mask_actions,
         tensorboard_log=f"./logs/sac_{args.scorer}"
     )
     

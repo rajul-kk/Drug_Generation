@@ -27,6 +27,13 @@ DEFAULT_VOCAB = [
     '[nH]', '[O-]', '[N+]', '[nH+]'
 ]
 
+ATOM_TOKENS = {
+    'C', 'N', 'O', 'S', 'P', 'F', 'Cl', 'Br', 'I',
+    'c', 'n', 'o', 's', 'p', '[nH]', '[O-]', '[N+]', '[nH+]'
+}
+BOND_TOKENS = {'=', '#', '-'}
+RING_TOKENS = {'1', '2', '3', '4', '5', '6'}
+
 class MoleculeEnv(gym.Env):
     """SMILES string building environment for RL agents."""
     metadata = {'render_modes': ['human']}
@@ -37,6 +44,7 @@ class MoleculeEnv(gym.Env):
         vocab: list = DEFAULT_VOCAB,
         max_steps: int = 60,
         continuous_actions: bool = False,
+        enable_action_masking: bool = False,
         duplicate_penalty: float = 1.0,
         novelty_bonus: float = 0.0,
         reference_smiles: Optional[Iterable[str]] = None,
@@ -49,6 +57,7 @@ class MoleculeEnv(gym.Env):
         self.vocab_size = len(vocab)
         self.max_steps = max_steps
         self.continuous_actions = continuous_actions
+        self.enable_action_masking = enable_action_masking
         self.duplicate_penalty = float(np.clip(duplicate_penalty, 0.0, 1.0))
         self.novelty_bonus = max(0.0, float(novelty_bonus))
         
@@ -102,6 +111,82 @@ class MoleculeEnv(gym.Env):
                 obs[i, self.state_seq[i]] = 1.0
         return obs.flatten()
 
+    def _get_token_history(self) -> list:
+        """Return generated token history up to current step, excluding PAD/STOP."""
+        tokens = []
+        for i in range(min(self.current_step, self.max_steps)):
+            token = self.idx_to_token.get(int(self.state_seq[i]), '<PAD>')
+            if token in ('<PAD>', '<STOP>'):
+                continue
+            tokens.append(token)
+        return tokens
+
+    def get_action_mask(self) -> np.ndarray:
+        """
+        Return a boolean mask of valid actions for the current state.
+
+        This is a lightweight, syntax-oriented mask to reduce invalid transitions.
+        It is intentionally conservative and prioritizes stability over completeness.
+        """
+        mask = np.zeros(self.vocab_size, dtype=bool)
+
+        tokens = self._get_token_history()
+        if not tokens:
+            # Require the first token to be an atom-like token.
+            for token in ATOM_TOKENS:
+                if token in self.token_to_idx:
+                    mask[self.token_to_idx[token]] = True
+            return mask
+
+        last = tokens[-1]
+        open_parens = sum(1 for t in tokens if t == '(') - sum(1 for t in tokens if t == ')')
+        ring_balance = {d: 0 for d in RING_TOKENS}
+        for t in tokens:
+            if t in ring_balance:
+                ring_balance[t] += 1
+
+        def allow(token: str) -> None:
+            idx = self.token_to_idx.get(token)
+            if idx is not None:
+                mask[idx] = True
+
+        last_is_atom_like = last in ATOM_TOKENS or last in RING_TOKENS or last == ')'
+        last_is_bond = last in BOND_TOKENS
+        last_is_open_paren = last == '('
+
+        # Stopping is valid once at least one atom has been produced.
+        if any(t in ATOM_TOKENS for t in tokens):
+            allow('<STOP>')
+
+        # After atom-like token, allow continuation with atoms, bonds, branches, and rings.
+        if last_is_atom_like:
+            for token in ATOM_TOKENS:
+                allow(token)
+            for token in BOND_TOKENS:
+                allow(token)
+            allow('(')
+            if open_parens > 0:
+                allow(')')
+            for digit in RING_TOKENS:
+                # Prefer opening/closing one ring per digit.
+                if ring_balance[digit] <= 1:
+                    allow(digit)
+
+        # After bond or open parenthesis, force an atom-like token.
+        if last_is_bond or last_is_open_paren:
+            for token in ATOM_TOKENS:
+                allow(token)
+
+        # Ensure we always have a valid action to avoid deadlocks.
+        if not np.any(mask):
+            allow('<STOP>')
+
+        return mask
+
+    def action_masks(self) -> np.ndarray:
+        """Compatibility alias used by sb3-contrib ActionMasker."""
+        return self.get_action_mask()
+
     def reset(self, seed: Optional[int] = None, options: Optional[Dict[str, Any]] = None):
         """Resets the environment for a new molecule."""
         super().reset(seed=seed)
@@ -116,8 +201,19 @@ class MoleculeEnv(gym.Env):
         """Takes a step in the environment."""
         # Handle continuous actions from continuous SAC by taking the argmax
         if self.continuous_actions:
-            # If continuous, argmax over the vocab probabilities
-            action_idx = int(np.argmax(action))
+            action_values = np.asarray(action, dtype=np.float32).reshape(-1)
+            if action_values.size != self.vocab_size:
+                action_values = np.resize(action_values, self.vocab_size)
+
+            if self.enable_action_masking:
+                mask = self.get_action_mask()
+                masked_values = np.where(mask, action_values, -np.inf)
+                if np.all(~np.isfinite(masked_values)):
+                    action_idx = int(np.argmax(action_values))
+                else:
+                    action_idx = int(np.argmax(masked_values))
+            else:
+                action_idx = int(np.argmax(action_values))
         else:
             # If discrete (PPO), action might be a scalar or a wrapped array [[idx]]
             action_idx = int(np.squeeze(action))

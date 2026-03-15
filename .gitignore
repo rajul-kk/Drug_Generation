@@ -5,3 +5,5 @@ __pycache__/
 logs/
 checkpoints/
 .pytest_cache/
+*.txt
+*.log

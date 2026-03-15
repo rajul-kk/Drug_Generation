@@ -329,11 +329,10 @@ if __name__ == "__main__":
     import argparse
     import sys
     import os
-    from core.chemistry import canonicalize_smiles
-    
-    # Needs to be imported here to prevent circular imports if scoring/env imports SAC
-    # Add project root to sys.path so we can import core and envs correctly
+
+    # Add project root to sys.path before any local imports so 'core' and 'envs' resolve.
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from core.chemistry import canonicalize_smiles
     from core.scoring import get_scorer
     from envs.molecule_env import MoleculeEnv
     

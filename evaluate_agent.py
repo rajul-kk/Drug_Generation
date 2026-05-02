@@ -77,6 +77,8 @@ def main():
     parser.add_argument("--duplicate-penalty", type=float, default=1.0, help="Duplicate molecule penalty in [0,1]; 1.0 disables penalty")
     parser.add_argument("--novelty-bonus", type=float, default=0.0, help="Bonus added to novel molecules when reference file is set")
     parser.add_argument("--max-diversity-pairs", type=int, default=50000, help="Max pairwise comparisons for internal diversity")
+    parser.add_argument("--save-smiles", type=str, default=None, help="Write generated SMILES + scores to this file (one per line)")
+    parser.add_argument("--save-img", type=str, default=None, help="Directory to save 2D grid and 3D render PNGs")
     args = parser.parse_args()
     
     print(f"Loading {args.agent.upper()} model from {args.model}...")
@@ -116,6 +118,7 @@ def main():
     deterministic = not args.stochastic
     generated_canonical = []
     valid_canonical = []
+    scored_molecules = []   # (canonical_smiles, score) for every generated molecule
     
     for ep in range(args.episodes):
         obs, _ = env.reset()
@@ -157,7 +160,8 @@ def main():
 
         if canonical:
             generated_canonical.append(canonical)
-            
+            scored_molecules.append((canonical, reward))
+
         total_reward += reward
         print(f"[{ep+1:02d}/{args.episodes:02d}] {valid_mark} Score: {reward:.3f}  |  {display_smiles}")
 
@@ -184,6 +188,30 @@ def main():
     if novelty is not None:
         print(f"Novelty (valid vs reference): {novelty*100:.1f}%")
     print(f"Internal Diversity (1 - mean Tanimoto): {internal_diversity:.3f}")
+
+    # ------------------------------------------------------------------ #
+    # Optional: save SMILES file                                           #
+    # ------------------------------------------------------------------ #
+    if args.save_smiles:
+        os.makedirs(os.path.dirname(os.path.abspath(args.save_smiles)), exist_ok=True)
+        with open(args.save_smiles, "w", encoding="utf-8") as f:
+            for smi, score in scored_molecules:
+                f.write(f"{smi} {score:.6f}\n")
+        print(f"SMILES saved to {args.save_smiles}")
+
+    # ------------------------------------------------------------------ #
+    # Optional: render 2D grid + 3D best molecule                         #
+    # ------------------------------------------------------------------ #
+    if args.save_img:
+        from visualize_results import draw_molecule_grid, draw_3d_molecule
+        os.makedirs(args.save_img, exist_ok=True)
+        top_scored = sorted(scored_molecules, key=lambda x: x[1], reverse=True)
+        top20 = top_scored[:20]
+        grid_path = os.path.join(args.save_img, "molecules_2d_grid.png")
+        draw_molecule_grid(top20, grid_path)
+        if top20:
+            best_smi, best_score = top20[0]
+            draw_3d_molecule(best_smi, os.path.join(args.save_img, "best_molecule_3d.png"), score=best_score)
 
 if __name__ == "__main__":
     main()

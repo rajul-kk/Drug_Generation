@@ -73,11 +73,14 @@ class QEDScorer(MolecularScorer):
             if num_heavy_atoms < 5:
                 score *= (num_heavy_atoms / 5.0)
                 
-            # Penalize non-organic molecules (must contain Carbon) to prevent 'OIOICl' loops
-            has_carbon = any(atom.GetAtomicNum() == 6 for atom in mol.GetAtoms())
-            if not has_carbon:
-                score *= 0.1
-                
+            # Hard-zero for molecules without carbon or with too little carbon.
+            # Presence check alone is insufficient: 'COP=PC=P=PNPP' has C but is
+            # 6/10 phosphorus and games the QED formula.  Requiring carbon to make
+            # up at least 40% of heavy atoms closes that loophole.
+            carbon_count = sum(1 for a in mol.GetAtoms() if a.GetAtomicNum() == 6)
+            if carbon_count == 0 or carbon_count / num_heavy_atoms < 0.4:
+                return 0.0
+
             return score
         except Exception:
             return 0.0

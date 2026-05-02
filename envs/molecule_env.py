@@ -39,7 +39,7 @@ class MoleculeEnv(gym.Env):
     metadata = {'render_modes': ['human']}
 
     def __init__(
-        self, 
+        self,
         scorer: MolecularScorer,
         vocab: list = DEFAULT_VOCAB,
         max_steps: int = 60,
@@ -48,10 +48,13 @@ class MoleculeEnv(gym.Env):
         duplicate_penalty: float = 1.0,
         novelty_bonus: float = 0.0,
         reference_smiles: Optional[Iterable[str]] = None,
+        step_penalty: float = 0.0,
+        validity_bonus: float = 0.0,
+        max_seen_smiles: int = 10_000,
     ):
         # Initialize MoleculeEnv with scorer, vocabulary, and action space settings
         super().__init__()
-        
+
         self.scorer = scorer
         self.vocab = vocab
         self.vocab_size = len(vocab)
@@ -60,6 +63,9 @@ class MoleculeEnv(gym.Env):
         self.enable_action_masking = enable_action_masking
         self.duplicate_penalty = float(np.clip(duplicate_penalty, 0.0, 1.0))
         self.novelty_bonus = max(0.0, float(novelty_bonus))
+        self.step_penalty = max(0.0, float(step_penalty))
+        self.validity_bonus = max(0.0, float(validity_bonus))
+        self.max_seen_smiles = int(max_seen_smiles)
         
         self.token_to_idx = {t: i for i, t in enumerate(self.vocab)}
         self.idx_to_token = {i: t for i, t in enumerate(self.vocab)}
@@ -177,6 +183,21 @@ class MoleculeEnv(gym.Env):
             for token in ATOM_TOKENS:
                 allow(token)
 
+        # Aromatic ring constraint: RDKit rejects any SMILES where an aromatic
+        # atom is not part of a ring.  Two failure modes:
+        #   (a) aromatic atoms present but no ring digit used yet → block STOP
+        #   (b) a ring digit was opened (odd count) but not yet closed → block STOP
+        # In both cases we also ensure ring digits remain available.
+        _AROMATIC = {'c', 'n', 'o', 's', 'p'}
+        has_aromatic = any(t in _AROMATIC for t in tokens)
+        has_unclosed_ring = any(v % 2 == 1 for v in ring_balance.values())
+        if has_aromatic and (has_unclosed_ring or sum(ring_balance.values()) == 0):
+            stop_idx = self.token_to_idx.get('<STOP>')
+            if stop_idx is not None:
+                mask[stop_idx] = False
+            for digit in RING_TOKENS:
+                allow(digit)
+
         # Ensure we always have a valid action to avoid deadlocks.
         if not np.any(mask):
             allow('<STOP>')
@@ -187,7 +208,7 @@ class MoleculeEnv(gym.Env):
         """Compatibility alias used by sb3-contrib ActionMasker."""
         return self.get_action_mask()
 
-    def reset(self, seed: Optional[int] = None, options: Optional[Dict[str, Any]] = None):
+    def reset(self, seed: Optional[int] = None, options: Optional[Dict[str, Any]] = None):  # noqa: ARG002
         """Resets the environment for a new molecule."""
         super().reset(seed=seed)
         
@@ -244,35 +265,60 @@ class MoleculeEnv(gym.Env):
         canonical_smiles = ""
         is_duplicate = False
         is_novel = False
+        base_score = 0.0
         if terminated or truncated:
             if len(self.smiles) > 0:
-                reward = self.scorer.score(self.smiles)
+                base_score = self.scorer.score(self.smiles)
+                reward = base_score
 
                 canonical_smiles = canonicalize_smiles(self.smiles)
                 if canonical_smiles:
+                    # 1. Validity bonus — flat boost for any RDKit-valid molecule.
+                    #    Helps the agent bootstrap valid SMILES early in training
+                    #    before it has learned to optimise the objective.
+                    if self.validity_bonus > 0.0:
+                        reward = min(1.0, reward + self.validity_bonus)
+
+                    # 2. Duplicate penalty — scale down reward for seen molecules.
+                    #    Cap the memory set so it doesn't grow unboundedly over a
+                    #    long training run (cleared when full, penalty stays active).
                     is_duplicate = canonical_smiles in self.seen_smiles
                     if is_duplicate:
                         reward *= self.duplicate_penalty
                     else:
                         self.seen_smiles.add(canonical_smiles)
+                        if self.max_seen_smiles > 0 and len(self.seen_smiles) >= self.max_seen_smiles:
+                            self.seen_smiles.clear()
 
+                    # 3. Novelty bonus — headroom formula keeps reward in [0, 1]
+                    #    without clipping distortion and preserves relative ordering:
+                    #    a high-QED novel molecule still scores higher than a low-QED
+                    #    novel molecule, unlike a flat additive bonus that saturates.
                     if self.reference_smiles:
                         is_novel = canonical_smiles not in self.reference_smiles
                         if is_novel:
-                            reward += self.novelty_bonus
+                            reward += self.novelty_bonus * (1.0 - reward)
+
+                # 4. Step penalty — deduct a fraction of the reward proportional to
+                #    how much of the token budget was used.  Encourages the agent to
+                #    emit <STOP> early rather than padding to max_steps.
+                if self.step_penalty > 0.0:
+                    reward = max(0.0, reward - self.step_penalty * (self.current_step / self.max_steps))
 
                 reward = float(np.clip(reward, 0.0, 1.0))
             else:
                 reward = 0.0
-                
-        # Optional info dict
+
+        # Info dict
         info = {
             'smiles': self.smiles,
             'canonical_smiles': canonical_smiles,
             'step': self.current_step,
-            'is_valid': reward > 0.0 if (terminated or truncated) else False,
+            # is_valid uses RDKit canonicalization — independent of reward shaping.
+            'is_valid': bool(canonical_smiles) if (terminated or truncated) else False,
             'is_duplicate': is_duplicate,
             'is_novel': is_novel,
+            'base_score': base_score,
         }
         
         return self._get_obs(), reward, terminated, truncated, info

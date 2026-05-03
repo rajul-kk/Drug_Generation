@@ -73,12 +73,18 @@ class QEDScorer(MolecularScorer):
             if num_heavy_atoms < 5:
                 score *= (num_heavy_atoms / 5.0)
                 
-            # Hard-zero for molecules without carbon or with too little carbon.
-            # Presence check alone is insufficient: 'COP=PC=P=PNPP' has C but is
-            # 6/10 phosphorus and games the QED formula.  Requiring carbon to make
-            # up at least 40% of heavy atoms closes that loophole.
-            carbon_count = sum(1 for a in mol.GetAtoms() if a.GetAtomicNum() == 6)
+            # Hard-zero for non-drug-like element compositions.
+            # Rule 1: carbon must be present and make up ≥40% of heavy atoms.
+            #   'COP=PC=P=PNPP' (20% C) and similar P-chains fail here.
+            # Rule 2: phosphorus count capped at 2.
+            #   'CPNC=P=PC=PCPC' passes rule 1 (45% C) but has 5 P atoms —
+            #   pharmaceutical drugs almost never contain more than 1–2 P atoms.
+            atom_nums = [a.GetAtomicNum() for a in mol.GetAtoms()]
+            carbon_count = atom_nums.count(6)
+            phosphorus_count = atom_nums.count(15)
             if carbon_count == 0 or carbon_count / num_heavy_atoms < 0.4:
+                return 0.0
+            if phosphorus_count > 2:
                 return 0.0
 
             return score
